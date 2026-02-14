@@ -12,18 +12,25 @@ export interface MailchkConfig {
 
 export interface ValidationResult {
   email: string;
+  domain: string;
   valid: boolean;
   disposable: boolean;
-  catchAll: boolean;
-  freeProvider: boolean;
-  roleAccount: boolean;
-  mxExists: boolean;
-  mxRecords: MxRecord[];
-  riskScore: 'low' | 'medium' | 'high' | 'critical';
-  riskFactors: string[];
-  syntaxValid: boolean;
-  domain: string;
-  localPart: string;
+  scam_domain: boolean;
+  mx_exists: boolean;
+  mx_records?: MxRecord[];
+  blacklisted_mx: boolean;
+  free_email: boolean;
+  did_you_mean: string;
+  risk_score: 'low' | 'medium' | 'high' | 'critical';
+  risk_factors: string[];
+  reason?: string;
+  email_provider: string | null;
+  deliverability_score: number;
+  spf: 'pass' | 'fail' | 'none';
+  dmarc: 'pass' | 'fail' | 'none';
+  normalized_email: string;
+  is_aliased: boolean;
+  alias_type: 'plus_addressing' | 'dot_variation' | 'subdomain_addressing' | 'provider_alias' | null;
 }
 
 export interface MxRecord {
@@ -86,7 +93,7 @@ class Mailchk {
       throw new MailchkError('Email address is required');
     }
 
-    const response = await this.request<ValidationResult>('/validate', {
+    const response = await this.request<ValidationResult>('/check', {
       email: email.trim().toLowerCase()
     });
 
@@ -109,7 +116,7 @@ class Mailchk {
 
     const cleanedEmails = emails.map(e => e.trim().toLowerCase());
 
-    const response = await this.request<BulkValidationResult>('/validate/bulk', {
+    const response = await this.request<BulkValidationResult>('/check/bulk', {
       emails: cleanedEmails
     });
 
@@ -127,7 +134,7 @@ class Mailchk {
   }
 
   /**
-   * Check if an email is valid (syntax, MX records, not disposable)
+   * Check if an email is valid
    * @param email - Email address to check
    * @returns True if valid, false otherwise
    */
@@ -143,24 +150,17 @@ class Mailchk {
    */
   async getRiskScore(email: string): Promise<string> {
     const result = await this.validate(email);
-    return result.riskScore;
+    return result.risk_score;
   }
 
   /**
-   * Check MX records for a domain
-   * @param domain - Domain to check
-   * @returns Array of MX records
+   * Get the deliverability score for an email address
+   * @param email - Email address to check
+   * @returns Deliverability score (0-100)
    */
-  async checkMx(domain: string): Promise<MxRecord[]> {
-    if (!domain || typeof domain !== 'string') {
-      throw new MailchkError('Domain is required');
-    }
-
-    const response = await this.request<{ mxRecords: MxRecord[] }>('/mx', {
-      domain: domain.trim().toLowerCase()
-    });
-
-    return response.mxRecords;
+  async getDeliverabilityScore(email: string): Promise<number> {
+    const result = await this.validate(email);
+    return result.deliverability_score;
   }
 
   /**
@@ -189,7 +189,7 @@ class Mailchk {
         headers: {
           'Content-Type': 'application/json',
           'X-API-Key': this.apiKey,
-          'User-Agent': 'mailchk-node/1.0.0'
+          'User-Agent': 'mailchk-node/1.1.0'
         },
         body: params ? JSON.stringify(params) : undefined,
         signal: controller.signal
